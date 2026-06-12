@@ -19,26 +19,59 @@ export default function Home() {
   const [title, setTitle] = useState('')
   const [price, setPrice] = useState('')
   const [faculty, setFaculty] = useState('')
+  const [search, setSearch] = useState('')
+
   const [image, setImage] = useState<File | null>(null)
 
   const [textbooks, setTextbooks] = useState<Textbook[]>([])
   const [user, setUser] = useState<User | null>(null)
+  const [verified, setVerified] = useState(false)
 
   // ユーザー取得
-  const fetchUser = async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+const fetchUser = async () => {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
 
-    setUser(user)
+  setUser(user)
+
+  if (!user) {
+    setVerified(false)
+    return
   }
+  await supabase
+  .from('users')
+  .upsert({
+    id: user.id,
+    email: user.email,
+  })
+
+  const { data } = await supabase
+    .from('users')
+    .select('verified')
+    .eq('id', user.id)
+    .single()
+
+  console.log('EMAIL =', user.email)
+  console.log('VERIFIED =', data?.verified)
+
+  setVerified(data?.verified ?? false)
+}
 
   // 投稿一覧取得
   const fetchTextbooks = async () => {
-    const { data, error } = await supabase
+
+    let query = supabase
       .from('textbooks')
       .select('*')
       .order('created_at', { ascending: false })
+
+    // 検索機能
+    if (search) {
+      query = query.ilike('title', `%${search}%`)
+    }
+
+    const { data, error } = await query
 
     if (data) {
       setTextbooks(data)
@@ -60,10 +93,15 @@ export default function Home() {
   const handleLogout = async () => {
     await supabase.auth.signOut()
     setUser(null)
+    setVerified(false)
   }
 
   // 投稿処理
   const handleSubmit = async () => {
+    if (!verified) {
+  alert('学生認証が完了していません')
+  return
+}
     if (!user) {
       alert('ログインしてください')
       return
@@ -160,10 +198,12 @@ export default function Home() {
     supabase.auth.onAuthStateChange(() => {
       fetchUser()
     })
-  }, [])
+
+  }, [search])
 
   return (
     <main className="p-10">
+
       <h1 className="text-3xl font-bold mb-6">
         教科書マーケット
       </h1>
@@ -178,6 +218,10 @@ export default function Home() {
               ログイン中:
               {' '}
               {user.email}
+            </p>
+            <p>
+              認証状態：
+              {verified ? "承認済み" : "未承認"}
             </p>
 
             <button
@@ -198,6 +242,15 @@ export default function Home() {
         )}
 
       </div>
+
+      {/* 検索 */}
+      <input
+        type="text"
+        placeholder="教科書検索"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        className="border p-2 mb-6 w-full max-w-sm"
+      />
 
       {/* 投稿フォーム */}
       <div className="flex flex-col gap-4 max-w-sm mb-10">
@@ -292,6 +345,7 @@ export default function Home() {
         ))}
 
       </div>
+
     </main>
   )
 }
