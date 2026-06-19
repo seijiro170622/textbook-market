@@ -189,6 +189,20 @@ const fetchUser = async () => {
       fetchTextbooks()
     }
   }
+  const handleSold = async (id: string) => {
+  const { error } = await supabase
+      .from('textbooks')
+      .update({ is_sold: true })
+      .eq('id', id)
+
+    if (error) {
+      console.log(error)
+      alert('更新失敗')
+    } else {
+      alert('売却済みにしました')
+      fetchTextbooks()
+    }
+  }
 
   // 初回取得
   useEffect(() => {
@@ -331,15 +345,34 @@ const fetchUser = async () => {
 
             {/* 自分の投稿だけ削除可能 */}
             {user?.id === book.user_id && (
-              <button
-                onClick={() =>
-                  handleDelete(book.id, book.image_path)
-                }
-                className="bg-red-500 text-white px-3 py-1 rounded mt-2"
-              >
-                削除
-              </button>
-            )}
+            <div className="flex gap-4 mt-2">
+            <button
+              onClick={() => handleSold(book.id)}
+              style={{
+                backgroundColor: 'green',
+                color: 'white',
+                padding: '8px 12px',
+                borderRadius: '6px'
+              }}
+            >
+              売却済みにする
+            </button>
+
+            <button
+              onClick={() =>
+                handleDelete(book.id, book.image_path)
+              }
+              style={{
+                backgroundColor: 'red',
+                color: 'white',
+                padding: '8px 12px',
+                borderRadius: '6px'
+              }}
+            >
+              削除
+            </button>
+          </div>
+                    )}
 
           </div>
         ))}
