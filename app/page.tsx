@@ -12,10 +12,13 @@ type Textbook = {
   image_path: string
   faculty: string
   is_sold: boolean
+  is_reserved: boolean
+  reserved_by: string | null
   user_id: string
 }
 
 export default function Home() {
+  const [isbn, setIsbn] = useState("");
   const [title, setTitle] = useState('')
   const [price, setPrice] = useState('')
   const [faculty, setFaculty] = useState('')
@@ -26,37 +29,47 @@ export default function Home() {
   const [textbooks, setTextbooks] = useState<Textbook[]>([])
   const [user, setUser] = useState<User | null>(null)
   const [verified, setVerified] = useState(false)
+  const [publisher, setPublisher] = useState("");
+  const [listPrice, setListPrice] = useState("");
+  const [agreedToPricingTerms, setAgreedToPricingTerms] = useState(false)
+  const [showPricingTerms, setShowPricingTerms] = useState(false)
+  const [priceLookupMessage, setPriceLookupMessage] = useState('')
+
+  const sellingPrice = Number(price) || 0
+  const platformFee = Math.floor(sellingPrice * 0.1)
+  const sellerReceives = sellingPrice - platformFee
+
 
   // ユーザー取得
-const fetchUser = async () => {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const fetchUser = async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
 
-  setUser(user)
+    setUser(user)
 
-  if (!user) {
-    setVerified(false)
-    return
-  }
-  await supabase
-  .from('users')
-  .upsert({
-    id: user.id,
-    email: user.email,
-  })
-
-  const { data } = await supabase
+    if (!user) {
+      setVerified(false)
+      return
+    }
+    await supabase
     .from('users')
-    .select('verified')
-    .eq('id', user.id)
-    .single()
+    .upsert({
+      id: user.id,
+      email: user.email,
+    })
 
-  console.log('EMAIL =', user.email)
-  console.log('VERIFIED =', data?.verified)
+    const { data } = await supabase
+      .from('users')
+      .select('verified')
+      .eq('id', user.id)
+      .single()
 
-  setVerified(data?.verified ?? false)
-}
+    console.log('EMAIL =', user.email)
+    console.log('VERIFIED =', data?.verified)
+
+    setVerified(data?.verified ?? false)
+  }
 
   // 投稿一覧取得
   const fetchTextbooks = async () => {
@@ -96,16 +109,77 @@ const fetchUser = async () => {
     setVerified(false)
   }
 
+// 投稿一覧取得
+  const fetchBookInfo = async () => {
+    if (!isbn) {
+      alert('ISBNを入力してください')
+      return
+    }
+
+    setPriceLookupMessage('')
+    setListPrice('')
+
+    try {
+      const res = await fetch(
+        `https://api.openbd.jp/v1/get?isbn=${isbn}`
+      )
+      const data: any[] = await res.json()
+
+      if (!data[0]?.summary) {
+        setPriceLookupMessage('定価を取得できませんでした')
+        alert('教科書が見つかりませんでした')
+        return
+      }
+
+      const record = data[0]
+      const book = record.summary
+
+      setTitle(book.title || '')
+      setPublisher(book.publisher || '')
+
+      const prices = record.onix?.ProductSupply?.SupplyDetail?.Price
+      const recommendedPrice = Array.isArray(prices)
+        ? prices.find((item: any) => String(item.PriceType) === '02')
+        : undefined
+
+      const fetchedListPrice = recommendedPrice?.PriceAmount
+
+      if (fetchedListPrice) {
+        setListPrice(String(fetchedListPrice))
+      } else {
+        setPriceLookupMessage('定価を取得できませんでした')
+      }
+    } catch (error) {
+      console.error(error)
+      setPriceLookupMessage('定価を取得できませんでした')
+      alert('取得に失敗しました')
+    }
+  }
+
   // 投稿処理
   const handleSubmit = async () => {
     if (!verified) {
   alert('学生認証が完了していません')
   return
-}
+  }
     if (!user) {
       alert('ログインしてください')
       return
     }
+
+    if (
+      listPrice &&
+      Number(price) > Number(listPrice) - 100
+    ) {
+      alert('販売価格は定価より100円以上安くしてください')
+      return
+    }
+
+    if (!agreedToPricingTerms) {
+      alert('販売価格と手数料のルールに同意してください')
+      return
+    }
+
 
     let imageUrl = ''
     let imagePath = ''
@@ -136,15 +210,16 @@ const fetchUser = async () => {
     const { error } = await supabase
       .from('textbooks')
       .insert([
-        {
-          title,
-          price: Number(price),
-          image_url: imageUrl,
-          image_path: imagePath,
-          faculty,
-          is_sold: false,
-          user_id: user.id,
-        },
+              {
+        title,
+        price: Number(price),
+        image_url: imageUrl,
+        image_path: imagePath,
+        faculty,
+        is_sold: false,
+        is_reserved: false,
+        user_id: user.id,
+      },
       ])
 
     if (error) {
@@ -157,6 +232,8 @@ const fetchUser = async () => {
       setPrice('')
       setFaculty('')
       setImage(null)
+      setAgreedToPricingTerms(false)
+      setShowPricingTerms(false)
 
       fetchTextbooks()
     }
@@ -189,6 +266,27 @@ const fetchUser = async () => {
       fetchTextbooks()
     }
   }
+
+// 売却済み解除
+  const handleUnsold = async (id: string) => {
+  const { error } = await supabase
+      .from('textbooks')
+      .update({
+        is_sold: false,
+        is_reserved: false,
+        reserved_by: null,
+      })
+      .eq('id', id)
+
+    if (error) {
+      alert('解除失敗')
+    } else {
+      alert('売却済みを解除しました')
+      fetchTextbooks()
+    }
+  }
+
+// 売却済みにする
   const handleSold = async (id: string) => {
   const { error } = await supabase
       .from('textbooks')
@@ -204,6 +302,53 @@ const fetchUser = async () => {
     }
   }
 
+// 予約する
+  const handleReserve = async (id: string) => {
+  if (!user) {
+    alert('ログインしてください')
+    return
+  }
+
+  console.log('reserve id =', id)
+
+  const { data, error } = await supabase
+    .from('textbooks')
+    .update({
+      is_reserved: true,
+      reserved_by: user.id,
+    })
+    .eq('id', id)
+    .select()
+
+  console.log('data=', data)
+  console.log('error=', error)
+
+    if (error) {
+      alert('予約失敗')
+      return
+    }
+
+    alert('予約しました')
+    fetchTextbooks()
+  }
+  const handleCancelReserve = async (id: string) => {
+  const { error } = await supabase
+    .from('textbooks')
+    .update({
+      is_reserved: false,
+      reserved_by: null,
+    })
+    .eq('id', id)
+
+    if (error) {
+      console.log(error)
+      alert('予約キャンセル失敗')
+    } else {
+      alert('予約をキャンセルしました')
+      fetchTextbooks()
+    }
+  }
+
   // 初回取得
   useEffect(() => {
     fetchTextbooks()
@@ -215,6 +360,7 @@ const fetchUser = async () => {
 
   }, [search])
 
+// 画面表示
   return (
     <main className="p-10">
 
@@ -260,7 +406,7 @@ const fetchUser = async () => {
       {/* 検索 */}
       <input
         type="text"
-        placeholder="教科書検索"
+        placeholder="🔍教科書検索"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         className="border p-2 mb-6 w-full max-w-sm"
@@ -268,6 +414,32 @@ const fetchUser = async () => {
 
       {/* 投稿フォーム */}
       <div className="flex flex-col gap-4 max-w-sm mb-10">
+
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={isbn}
+              onChange={(e) => setIsbn(e.target.value)}
+              placeholder="ISBNを入力"
+              className="border p-2 flex-1"
+            />
+
+            <input
+              type="text"
+              placeholder="出版社"
+              value={publisher}
+              onChange={(e) => setPublisher(e.target.value)}
+              className="border p-2"
+            />
+
+          <button
+            type="button"
+              onClick={fetchBookInfo}
+              className="bg-blue-500 text-white px-4 rounded"
+          >
+            取得
+          </button>
+          </div>
 
         <input
           type="text"
@@ -284,6 +456,20 @@ const fetchUser = async () => {
           onChange={(e) => setPrice(e.target.value)}
           className="border p-2"
         />
+
+        <input
+          type="number"
+          placeholder="定価"
+          value={listPrice ?? ""}
+          onChange={(e) => setListPrice(e.target.value)}
+          className="border p-2"
+        />
+
+        {priceLookupMessage && (
+          <p className="text-red-600">
+            {priceLookupMessage}。裏表紙の税込価格を定価欄に手入力してください。
+          </p>
+        )}
 
         <input
           type="text"
@@ -304,7 +490,11 @@ const fetchUser = async () => {
         />
 
         <button
-          onClick={handleSubmit}
+          type="button"
+          onClick={() => {
+            setAgreedToPricingTerms(false)
+            setShowPricingTerms(true)
+          }}
           className="bg-black text-white p-2 rounded"
         >
           投稿
@@ -312,6 +502,57 @@ const fetchUser = async () => {
 
       </div>
 
+      {showPricingTerms && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-lg rounded bg-white p-6 shadow-xl">
+            <h2 className="mb-3 text-xl font-bold">
+              販売価格と手数料について
+            </h2>
+
+            <p className="mb-3">
+              販売価格は、定価の50%以上かつ定価より100円以上安い金額で設定してください。
+              商品が売れた場合、販売価格の10%を販売手数料としていただきます。
+            </p>
+
+            <p>販売価格：{sellingPrice.toLocaleString()}円</p>
+            <p>手数料：{platformFee.toLocaleString()}円</p>
+            <p>出品者の受取予定額：{sellerReceives.toLocaleString()}円</p>
+
+            <p className="my-3">
+              例：定価3,000円、販売価格2,900円の場合、手数料290円、受取予定額2,610円
+            </p>
+
+            <label className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                checked={agreedToPricingTerms}
+                onChange={(event) =>
+                  setAgreedToPricingTerms(event.target.checked)
+                }
+              />
+              上記の販売価格・手数料ルールに同意して出品します。
+            </label>
+
+            <div className="mt-4 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowPricingTerms(false)}
+                className="rounded bg-gray-500 px-4 py-2 text-white"
+              >
+                戻る
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSubmit}
+                className="rounded bg-black px-4 py-2 text-white"
+              >
+                同意して出品
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* 投稿一覧 */}
       <div className="flex flex-col gap-4">
 
@@ -336,43 +577,101 @@ const fetchUser = async () => {
             <p>{book.price}円</p>
 
             <p>{book.faculty}</p>
+            {!book.is_reserved &&
+            !book.is_sold &&
+            user?.id !== book.user_id && (
+              <button
+                onClick={() => handleReserve(book.id)}
+                style={{
+                  backgroundColor: 'orange',
+                  color: 'white',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  marginTop: '8px'
+                }}
+              >
+                予約する
+              </button>
+            )}
+
+            {book.is_reserved && !book.is_sold && (
+              <p style={{ color: 'orange' }}>
+                🟠 予約済み
+              </p>
+            )}
+            
+            {book.reserved_by === user?.id &&
+            !book.is_sold && (
+              <button
+                onClick={() => handleCancelReserve(book.id)}
+                style={{
+                  backgroundColor: 'gray',
+                  color: 'white',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  marginTop: '8px'
+                }}
+              >
+                予約キャンセル
+              </button>
+            )}
 
             {book.is_sold && (
-              <p className="text-red-500">
-                売却済み
+              <button
+                onClick={() => handleUnsold(book.id)}
+                style={{
+                  backgroundColor: '#2563eb',
+                  color: 'white',
+                  padding: '8px 12px',
+                  borderRadius: '6px'
+                }}
+              >
+                売却済みを解除
+              </button>
+            )}
+            
+            {user?.id === book.user_id &&
+            book.reserved_by && (
+              <p style={{ color: 'orange' }}>
+                🟠予約者あり
               </p>
             )}
 
-            {/* 自分の投稿だけ削除可能 */}
+            {/* 自分の投稿だけ操作可能 */}
+                        {/* 投稿者だけ操作可能 */}
             {user?.id === book.user_id && (
-            <div className="flex gap-4 mt-2">
-            <button
-              onClick={() => handleSold(book.id)}
-              style={{
-                backgroundColor: 'green',
-                color: 'white',
-                padding: '8px 12px',
-                borderRadius: '6px'
-              }}
-            >
-              売却済みにする
-            </button>
+              <div className="flex gap-4 mt-2">
 
-            <button
-              onClick={() =>
-                handleDelete(book.id, book.image_path)
-              }
-              style={{
-                backgroundColor: 'red',
-                color: 'white',
-                padding: '8px 12px',
-                borderRadius: '6px'
-              }}
-            >
-              削除
-            </button>
-          </div>
-                    )}
+                {book.is_reserved && !book.is_sold && (
+                  <button
+                    onClick={() => handleSold(book.id)}
+                    style={{
+                      backgroundColor: 'green',
+                      color: 'white',
+                      padding: '8px 12px',
+                      borderRadius: '6px'
+                    }}
+                  >
+                    売却済みにする
+                  </button>
+                )}
+
+                <button
+                  onClick={() =>
+                    handleDelete(book.id, book.image_path)
+                  }
+                  style={{
+                    backgroundColor: 'red',
+                    color: 'white',
+                    padding: '8px 12px',
+                    borderRadius: '6px'
+                  }}
+                >
+                  削除
+                </button>
+
+              </div>
+            )}
 
           </div>
         ))}
