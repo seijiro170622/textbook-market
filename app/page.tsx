@@ -25,6 +25,18 @@ export default function Home() {
   const [search, setSearch] = useState('')
 
   const [image, setImage] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState('')
+
+  useEffect(() => {
+    if (!image) {
+      setImagePreview('')
+      return
+    }
+
+    const previewUrl = URL.createObjectURL(image)
+    setImagePreview(previewUrl)
+    return () => URL.revokeObjectURL(previewUrl)
+  }, [image])
 
   const [textbooks, setTextbooks] = useState<Textbook[]>([])
   const [user, setUser] = useState<User | null>(null)
@@ -479,15 +491,35 @@ export default function Home() {
           className="border p-2"
         />
 
-        <input
-          type="file"
-          accept="image/*"
-          onChange={(e) => {
-            if (e.target.files && e.target.files[0]) {
-              setImage(e.target.files[0])
-            }
-          }}
-        />
+        <div className="flex flex-col gap-3">
+          <input
+            id="textbook-image"
+            type="file"
+            accept="image/*"
+            className="sr-only peer"
+            onChange={(event) => {
+              const selectedImage = event.target.files?.[0] ?? null
+              event.target.value = ''
+              setImage(selectedImage)
+            }}
+          />
+          <label
+            htmlFor="textbook-image"
+            className="inline-flex w-fit cursor-pointer items-center rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500 peer-focus-visible:ring-offset-2"
+          >
+            {image ? '写真を変更' : '写真を選択'}
+          </label>
+          {image && imagePreview && (
+            <div className="flex items-center gap-3">
+              <img
+                src={imagePreview}
+                alt="選択した写真のプレビュー"
+                className="h-24 w-24 rounded border object-cover"
+              />
+              <span className="break-all text-sm text-gray-600">{image.name}</span>
+            </div>
+          )}
+        </div>
 
         <button
           type="button"
