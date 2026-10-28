@@ -11,6 +11,16 @@ type Textbook = {
   image_url: string
   image_path: string
   faculty: string
+  isbn?: string | null
+  publisher?: string | null
+  list_price?: number | null
+  course_type?: string | null
+  course_name?: string | null
+  writing_type?: string | null
+  writing_amount?: string | null
+  physical_damage?: string | null
+  stain_water_damage?: string | null
+  accessories_status?: string | null
   is_sold: boolean
   is_reserved: boolean
   reserved_by: string | null
@@ -22,9 +32,28 @@ export default function Home() {
   const [title, setTitle] = useState('')
   const [price, setPrice] = useState('')
   const [faculty, setFaculty] = useState('')
+  const [courseType, setCourseType] = useState('')
+  const [courseName, setCourseName] = useState('')
+  const [writingType, setWritingType] = useState('')
+  const [writingAmount, setWritingAmount] = useState('')
+  const [physicalDamage, setPhysicalDamage] = useState('')
+  const [stainWaterDamage, setStainWaterDamage] = useState('')
+  const [accessoriesStatus, setAccessoriesStatus] = useState('')
   const [search, setSearch] = useState('')
 
   const [image, setImage] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState('')
+
+  useEffect(() => {
+    if (!image) {
+      setImagePreview('')
+      return
+    }
+
+    const previewUrl = URL.createObjectURL(image)
+    setImagePreview(previewUrl)
+    return () => URL.revokeObjectURL(previewUrl)
+  }, [image])
 
   const [textbooks, setTextbooks] = useState<Textbook[]>([])
   const [user, setUser] = useState<User | null>(null)
@@ -99,6 +128,9 @@ export default function Home() {
   const handleLogin = async () => {
     await supabase.auth.signInWithOAuth({
       provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?next=/`,
+      },
     })
   }
 
@@ -158,6 +190,7 @@ export default function Home() {
 
   // 投稿処理
   const handleSubmit = async () => {
+    const normalizedIsbn = isbn.replace(/[^0-9X]/gi, '').toUpperCase()
     if (!verified) {
   alert('学生認証が完了していません')
   return
@@ -167,6 +200,52 @@ export default function Home() {
       return
     }
 
+    if (!normalizedIsbn) {
+      alert('ISBNを入力してください')
+      return
+    }
+
+    if (!title.trim()) {
+      alert('教科書名を入力してください')
+      return
+    }
+
+    if (!price || Number(price) <= 0) {
+      alert('販売価格を入力してください')
+      return
+    }
+
+    if (!courseType) {
+      alert('教養科目か専門科目を選択してください')
+      return
+    }
+
+    if (courseType === '専門科目' && !faculty.trim()) {
+      alert('専門科目は学部を入力してください')
+      return
+    }
+
+    if (
+      !writingType ||
+      !writingAmount ||
+      !physicalDamage ||
+      !stainWaterDamage ||
+      !accessoriesStatus
+    ) {
+      alert('本の状態をすべて選択してください')
+      return
+    }
+
+        if (!listPrice || Number(listPrice) <= 0) {
+      alert('定価を入力してください')
+      return
+    }
+
+    if (Number(price) < Number(listPrice) * 0.5) {
+      alert('販売価格は定価の50%以上で入力してください')
+      return
+    }
+    
     if (
       listPrice &&
       Number(price) > Number(listPrice) - 100
@@ -181,6 +260,21 @@ export default function Home() {
     }
 
 
+    const { data: sameIsbnListings, error: isbnCheckError } = await supabase
+      .from('textbooks')
+      .select('id, is_sold')
+      .eq('isbn_normalized', normalizedIsbn)
+
+    if (isbnCheckError) {
+      console.error(isbnCheckError)
+      alert('ISBNの重複確認に失敗しました。時間をおいて再度お試しください')
+      return
+    }
+
+    if (sameIsbnListings?.some((book) => book.is_sold !== true)) {
+      alert('このISBNの教科書はすでに出品されています')
+      return
+    }
     let imageUrl = ''
     let imagePath = ''
 
@@ -213,9 +307,19 @@ export default function Home() {
               {
         title,
         price: Number(price),
+        isbn: isbn.trim() || null,
+        publisher: publisher.trim() || null,
+        list_price: Number(listPrice),
         image_url: imageUrl,
         image_path: imagePath,
-        faculty,
+        faculty: courseType === '専門科目' ? faculty.trim() : '',
+        course_type: courseType,
+        course_name: courseName.trim() || null,
+        writing_type: writingType,
+        writing_amount: writingAmount,
+        physical_damage: physicalDamage,
+        stain_water_damage: stainWaterDamage,
+        accessories_status: accessoriesStatus,
         is_sold: false,
         is_reserved: false,
         user_id: user.id,
@@ -224,13 +328,29 @@ export default function Home() {
 
     if (error) {
       console.log(error)
-      alert('投稿失敗')
+      if (error.code === '23505') {
+        alert('このISBNの教科書はすでに出品されています')
+      } else if (error.code === '23514') {
+        alert('ISBNを入力してください')
+      } else {
+        alert('投稿失敗')
+      }
     } else {
       alert('投稿成功！')
 
+      setIsbn('')
       setTitle('')
       setPrice('')
       setFaculty('')
+      setPublisher('')
+      setListPrice('')
+      setCourseType('')
+      setCourseName('')
+      setWritingType('')
+      setWritingAmount('')
+      setPhysicalDamage('')
+      setStainWaterDamage('')
+      setAccessoriesStatus('')
       setImage(null)
       setAgreedToPricingTerms(false)
       setShowPricingTerms(false)
@@ -413,9 +533,9 @@ export default function Home() {
       />
 
       {/* 投稿フォーム */}
-      <div className="flex flex-col gap-4 max-w-sm mb-10">
+      <div className="listing-form grid grid-cols-1 gap-4 max-w-4xl mb-10 md:grid-cols-2">
 
-          <div className="flex gap-2">
+          <div className="flex gap-2 md:col-span-2">
             <input
               type="text"
               value={isbn}
@@ -429,7 +549,7 @@ export default function Home() {
               placeholder="出版社"
               value={publisher}
               onChange={(e) => setPublisher(e.target.value)}
-              className="border p-2"
+              className="border p-2 w-full"
             />
 
           <button
@@ -446,7 +566,7 @@ export default function Home() {
           placeholder="教科書名"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          className="border p-2"
+          className="border p-2 w-full"
         />
 
         <input
@@ -454,7 +574,7 @@ export default function Home() {
           placeholder="価格"
           value={price}
           onChange={(e) => setPrice(e.target.value)}
-          className="border p-2"
+          className="border p-2 w-full"
         />
 
         <input
@@ -462,32 +582,165 @@ export default function Home() {
           placeholder="定価"
           value={listPrice ?? ""}
           onChange={(e) => setListPrice(e.target.value)}
-          className="border p-2"
+          className="border p-2 w-full"
         />
 
         {priceLookupMessage && (
-          <p className="text-red-600">
+          <p className="text-red-600 md:col-span-2">
             {priceLookupMessage}。裏表紙の税込価格を定価欄に手入力してください。
           </p>
         )}
 
+        <label className="flex flex-col gap-1">
+          科目区分
+          <select
+            value={courseType}
+            onChange={(event) => {
+              const selectedType = event.target.value
+              setCourseType(selectedType)
+              if (selectedType === '教養科目') {
+                setFaculty('')
+              }
+            }}
+            className="border p-2 w-full"
+          >
+            <option value="">選択してください</option>
+            <option value="教養科目">教養科目</option>
+            <option value="専門科目">専門科目</option>
+          </select>
+        </label>
+
         <input
           type="text"
-          placeholder="学部"
+          placeholder="学部（専門科目の場合は必須）"
           value={faculty}
-          onChange={(e) => setFaculty(e.target.value)}
-          className="border p-2"
+          onChange={(event) => setFaculty(event.target.value)}
+          disabled={courseType === '教養科目'}
+          className="border p-2 w-full"
         />
 
         <input
-          type="file"
-          accept="image/*"
-          onChange={(e) => {
-            if (e.target.files && e.target.files[0]) {
-              setImage(e.target.files[0])
-            }
-          }}
+          type="text"
+          placeholder="授業名（任意）"
+          value={courseName}
+          onChange={(event) => setCourseName(event.target.value)}
+          className="border p-2 w-full"
         />
+
+        <label className="flex flex-col gap-1">
+          書き込みの種類
+          <select
+            value={writingType}
+            onChange={(event) => {
+              const selectedType = event.target.value
+              setWritingType(selectedType)
+              if (selectedType === 'なし') {
+                setWritingAmount('なし')
+              } else if (writingAmount === 'なし') {
+                setWritingAmount('')
+              }
+            }}
+            className="border p-2 w-full"
+          >
+            <option value="">選択してください</option>
+            <option value="なし">なし</option>
+            <option value="鉛筆のみ">鉛筆のみ</option>
+            <option value="ペン・マーカーあり">ペン・マーカーあり</option>
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1">
+          書き込みの量
+          <select
+            value={writingAmount}
+            onChange={(event) => setWritingAmount(event.target.value)}
+            disabled={writingType === 'なし'}
+            className="border p-2 w-full"
+          >
+            <option value="">選択してください</option>
+            {writingType === 'なし' ? (
+              <option value="なし">なし</option>
+            ) : (
+              <>
+                <option value="なし">なし</option>
+                <option value="少ない">少ない</option>
+                <option value="多い">多い</option>
+              </>
+            )}
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1">
+          ページ・表紙の傷み
+          <select
+            value={physicalDamage}
+            onChange={(event) => setPhysicalDamage(event.target.value)}
+            className="border p-2 w-full"
+          >
+            <option value="">選択してください</option>
+            <option value="なし">なし</option>
+            <option value="軽い折れ・傷">軽い折れ・傷</option>
+            <option value="破れ・欠けあり">破れ・欠けあり</option>
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1">
+          シミ・水濡れ
+          <select
+            value={stainWaterDamage}
+            onChange={(event) => setStainWaterDamage(event.target.value)}
+            className="border p-2 w-full"
+          >
+            <option value="">選択してください</option>
+            <option value="なし">なし</option>
+            <option value="少しあり">少しあり</option>
+            <option value="目立つ">目立つ</option>
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1">
+          付属品
+          <select
+            value={accessoriesStatus}
+            onChange={(event) => setAccessoriesStatus(event.target.value)}
+            className="border p-2 w-full"
+          >
+            <option value="">選択してください</option>
+            <option value="そろっている">そろっている</option>
+            <option value="一部不足">一部不足</option>
+            <option value="付属品なし・不明">付属品なし・不明</option>
+          </select>
+        </label>
+
+        <div className="flex flex-col gap-3 md:col-span-2">
+          <input
+            id="textbook-image"
+            type="file"
+            accept="image/*"
+            className="photo-file-input"
+            onChange={(event) => {
+              const selectedImage = event.target.files?.[0] ?? null
+              event.target.value = ''
+              setImage(selectedImage)
+            }}
+          />
+          <label
+            htmlFor="textbook-image"
+            className="photo-picker-button"
+          >
+            {image ? '写真を変更' : '写真を選択'}
+          </label>
+          {image && imagePreview && (
+            <div className="flex items-center gap-3">
+              <img
+                src={imagePreview}
+                alt="選択した写真のプレビュー"
+                className="photo-preview"
+              />
+              <span className="break-all text-sm text-gray-600">{image.name}</span>
+            </div>
+          )}
+        </div>
 
         <button
           type="button"
@@ -576,7 +829,13 @@ export default function Home() {
 
             <p>{book.price}円</p>
 
-            <p>{book.faculty}</p>
+            {book.course_type && <p>科目区分：{book.course_type}</p>}
+            {book.faculty && <p>学部：{book.faculty}</p>}
+            {book.course_name && <p>授業名：{book.course_name}</p>}
+            {book.writing_type && <p>書き込み：{book.writing_type}（{book.writing_amount}）</p>}
+            {book.physical_damage && <p>ページ・表紙の傷み：{book.physical_damage}</p>}
+            {book.stain_water_damage && <p>シミ・水濡れ：{book.stain_water_damage}</p>}
+            {book.accessories_status && <p>付属品：{book.accessories_status}</p>}
             {!book.is_reserved &&
             !book.is_sold &&
             user?.id !== book.user_id && (
@@ -681,3 +940,6 @@ export default function Home() {
     </main>
   )
 }
+
+
+
